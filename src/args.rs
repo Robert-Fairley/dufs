@@ -57,7 +57,7 @@ pub fn build_cli() -> Command {
                 .short('p')
                 .long("port")
                 .value_parser(value_parser!(u16))
-                .help("Specify port to listen on [default: 5000]")
+                .help("Specify port to listen on [default: 8000]")
                 .value_name("port"),
         )
         .arg(
@@ -642,7 +642,7 @@ fn default_addrs() -> Vec<BindAddr> {
 }
 
 fn default_port() -> u16 {
-    5000
+    8000
 }
 
 #[cfg(test)]
@@ -658,8 +658,17 @@ mod tests {
         let args = Args::parse(matches).unwrap();
         let cwd = Args::sanitize_path(std::env::current_dir().unwrap()).unwrap();
         assert_eq!(args.serve_path, cwd);
-        assert_eq!(args.port, default_port());
+        assert_eq!(args.port, 8000);
         assert_eq!(args.addrs, default_addrs());
+    }
+
+    #[test]
+    fn test_port_from_cli() {
+        let matches = build_cli()
+            .try_get_matches_from(vec!["", "--port", "5000"])
+            .unwrap();
+        let args = Args::parse(matches).unwrap();
+        assert_eq!(args.port, 5000);
     }
 
     #[test]
@@ -704,7 +713,7 @@ mod tests {
         let args = Args::parse(matches).unwrap();
         let cwd = Args::sanitize_path(std::env::current_dir().unwrap()).unwrap();
         assert_eq!(args.serve_path, cwd);
-        assert_eq!(args.port, default_port());
+        assert_eq!(args.port, 8000);
         assert_eq!(args.addrs, default_addrs());
     }
 

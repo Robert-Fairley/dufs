@@ -14,13 +14,38 @@ Dufs is a distinctive utility file server that supports static serving, uploadin
 - Download folder as zip file
 - Upload files and folders (Drag & Drop)
 - Create/Edit/Search files
+- Preview files in a dialog, including browser-supported images, audio and video, and download files directly
+- Choose a light or dark theme, or follow the system setting
 - Resumable/partial uploads/downloads
 - Access control
 - Support https
 - Support webdav
 - Easy to use with curl
 
+Image and media preview support depends on the browser's formats and codecs.
+Download is available when a file cannot be previewed.
+
 ## Install
+
+### From this checkout
+
+Run `./install.sh` to install the local release binary to `/usr/local/bin/dufs`.
+Pass a different directory and optionally a filename, for example
+`./install.sh "$HOME/.local/bin" dufsa`.
+
+The installer uses the existing release build, which may be older than the
+current source. If it is missing, the installer asks before building one. It
+refuses to replace a binary reporting the same version and asks before replacing
+a different or unidentifiable version. Installation requires write permission
+in the destination directory.
+
+To build a new release from this checkout, run `./release.sh`. This increases
+the package's patch version in `Cargo.toml` and builds the release, updating
+`Cargo.lock` as needed. Use `./release.sh --bump minor` or `--bump major` for a
+larger increment, or `./release.sh --version 1.2.3` for an explicit, higher
+`MAJOR.MINOR.PATCH` version. These commands modify the checkout's version files;
+if a build fails, inspect them before retrying. Direct `cargo build --release`
+does not bump the version. Release tags must match the package version.
 
 ### With cargo
 
@@ -31,7 +56,7 @@ cargo install dufs
 ### With docker
 
 ```
-docker run -v `pwd`:/data -p 5000:5000 --rm sigoden/dufs /data -A
+docker run -v `pwd`:/data -p 8000:8000 --rm sigoden/dufs /data -A -p 8000
 ```
 
 ### With [Homebrew](https://brew.sh)
@@ -57,7 +82,7 @@ Arguments:
 Options:
   -c, --config <file>        Specify configuration file
   -b, --bind <addrs>         Specify bind address or unix socket
-  -p, --port <port>          Specify port to listen on [default: 5000]
+  -p, --port <port>          Specify port to listen on [default: 8000]
       --path-prefix <path>   Specify a path prefix
       --hidden <value>       Hide paths from directory listings, e.g. tmp,*.log,*.lock
   -a, --auth <rules>         Add auth roles, e.g. user:pass@/dir1:rw,/dir2
@@ -155,72 +180,72 @@ dufs --tls-cert my.crt --tls-key my.key
 Upload a file
 
 ```sh
-curl -T path-to-file http://127.0.0.1:5000/new-path/path-to-file
+curl -T path-to-file http://127.0.0.1:8000/new-path/path-to-file
 ```
 
 Download a file
 ```sh
-curl http://127.0.0.1:5000/path-to-file           # download the file
-curl http://127.0.0.1:5000/path-to-file?hash      # retrieve the sha256 hash of the file
+curl http://127.0.0.1:8000/path-to-file           # download the file
+curl http://127.0.0.1:8000/path-to-file?hash      # retrieve the sha256 hash of the file
 ```
 
 Download a folder as zip file
 
 ```sh
-curl -o path-to-folder.zip http://127.0.0.1:5000/path-to-folder?zip
+curl -o path-to-folder.zip http://127.0.0.1:8000/path-to-folder?zip
 ```
 
 Delete a file/folder
 
 ```sh
-curl -X DELETE http://127.0.0.1:5000/path-to-file-or-folder
+curl -X DELETE http://127.0.0.1:8000/path-to-file-or-folder
 ```
 
 Create a directory
 
 ```sh
-curl -X MKCOL http://127.0.0.1:5000/path-to-folder
+curl -X MKCOL http://127.0.0.1:8000/path-to-folder
 ```
 
 Move the file/folder to the new path
 
 ```sh
-curl -X MOVE http://127.0.0.1:5000/path -H "Destination: http://127.0.0.1:5000/new-path"
+curl -X MOVE http://127.0.0.1:8000/path -H "Destination: http://127.0.0.1:8000/new-path"
 ```
 
 List/search directory contents
 
 ```sh
-curl http://127.0.0.1:5000?q=Dockerfile           # search for files, similar to `find -name Dockerfile`
-curl http://127.0.0.1:5000?simple                 # output names only, similar to `ls -1`
-curl http://127.0.0.1:5000?json                   # output paths in json format
+curl http://127.0.0.1:8000?q=Dockerfile           # search for files, similar to `find -name Dockerfile`
+curl http://127.0.0.1:8000?simple                 # output names only, similar to `ls -1`
+curl http://127.0.0.1:8000?json                   # output paths in json format
 ```
 
 With authorization (Both basic or digest auth works)
 
 ```sh
-curl http://127.0.0.1:5000/file --user user:pass                 # basic auth
-curl http://127.0.0.1:5000/file --user user:pass --digest        # digest auth
+curl http://127.0.0.1:8000/file --user user:pass                 # basic auth
+curl http://127.0.0.1:8000/file --user user:pass --digest        # digest auth
 ```
 
 Resumable downloads
 
 ```sh
-curl -C- -o file http://127.0.0.1:5000/file
+curl -C- -o file http://127.0.0.1:8000/file
 ```
 
 Resumable uploads
 
 ```sh
-upload_offset=$(curl -I -s http://127.0.0.1:5000/file | tr -d '\r' | sed -n 's/content-length: //p')
+upload_offset=$(curl -I -s http://127.0.0.1:8000/file | tr -d '\r' | sed -n 's/content-length: //p')
 dd skip=$upload_offset if=file status=none ibs=1 | \
-  curl -X PATCH -H "X-Update-Range: append" --data-binary @- http://127.0.0.1:5000/file
+  curl -X PATCH -H "X-Update-Range: append" --data-binary @- http://127.0.0.1:8000/file
 ```
 
 Health checks
 
 ```sh
-curl http://127.0.0.1:5000/__dufs__/health
+curl http://127.0.0.1:8000/__dufs__/health
 ```
 
 <details>
@@ -348,7 +373,7 @@ All options can be set using environment variables prefixed with `DUFS_`.
 [serve-path]                DUFS_SERVE_PATH="."
     --config <file>         DUFS_CONFIG=config.yaml
 -b, --bind <addrs>          DUFS_BIND=0.0.0.0
--p, --port <port>           DUFS_PORT=5000
+-p, --port <port>           DUFS_PORT=8000
     --path-prefix <path>    DUFS_PATH_PREFIX=/dufs
     --hidden <value>        DUFS_HIDDEN=tmp,*.log,*.lock
 -a, --auth <rules>          DUFS_AUTH="admin:admin@/:rw|@/" 
@@ -380,7 +405,7 @@ The following are the configuration items:
 ```yaml
 serve-path: '.'
 bind: 0.0.0.0
-port: 5000
+port: 8000
 path-prefix: /dufs
 hidden:
   - tmp

@@ -23,7 +23,7 @@
  * @property {boolean} auth
  * @property {string} user
  * @property {boolean} dir_exists
- * @property {string} editable
+ * @property {boolean} editable
  */
 
 var DUFS_MAX_UPLOADINGS = 1;
@@ -47,14 +47,16 @@ var DIR_EMPTY_NOTE;
  */
 const PARAMS = Object.fromEntries(new URLSearchParams(window.location.search).entries());
 
-const IFRAME_FORMATS = [
-  ".pdf",
-  ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg",
-  ".mp4", ".mov", ".avi", ".wmv", ".flv", ".webm",
-  ".mp3", ".ogg", ".wav", ".m4a",
+const IMAGE_FORMATS = [
+  ".jpg", ".jpeg", ".jpe", ".jfif", ".png", ".apng", ".gif", ".bmp", ".ico",
+  ".webp", ".svg", ".tif", ".tiff", ".avif", ".heic", ".heif",
 ];
+const IFRAME_FORMATS = [".pdf"];
+const VIDEO_FORMATS = [".mp4", ".m4v", ".mov", ".avi", ".wmv", ".flv", ".webm", ".ogv"];
+const AUDIO_FORMATS = [".mp3", ".ogg", ".oga", ".wav", ".m4a", ".aac", ".flac", ".opus"];
 
 const MAX_SUBPATHS_COUNT = 1000;
+const THEME_STORAGE_KEY = "dufs:theme";
 
 const ICONS = {
   dir: `<svg height="16" viewBox="0 0 14 16" width="14"><path fill-rule="evenodd" d="M13 4H7V3c0-.66-.31-1-1-1H1c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1V5c0-.55-.45-1-1-1zM6 4H1V3h5v1z"></path></svg>`,
@@ -65,7 +67,7 @@ const ICONS = {
   move: `<svg width="16" height="16" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M1.5 1.5A.5.5 0 0 0 1 2v4.8a2.5 2.5 0 0 0 2.5 2.5h9.793l-3.347 3.346a.5.5 0 0 0 .708.708l4.2-4.2a.5.5 0 0 0 0-.708l-4-4a.5.5 0 0 0-.708.708L13.293 8.3H3.5A1.5 1.5 0 0 1 2 6.8V2a.5.5 0 0 0-.5-.5z"/></svg>`,
   edit: `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168l10-10zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207 11.207 2.5zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293l6.5-6.5zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg>`,
   delete: `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M6.854 7.146a.5.5 0 1 0-.708.708L7.293 9l-1.147 1.146a.5.5 0 0 0 .708.708L8 9.707l1.146 1.147a.5.5 0 0 0 .708-.708L8.707 9l1.147-1.146a.5.5 0 0 0-.708-.708L8 8.293 6.854 7.146z"/><path d="M14 14V4.5L9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2zM9.5 3A1.5 1.5 0 0 0 11 4.5h2V14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h5.5v2z"/></svg>`,
-  view: `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2zm0 1h8a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1"/></svg>`,
+  view: `<i class="ph-bold ph-eye" aria-hidden="true"></i>`,
 }
 
 /**
@@ -120,6 +122,7 @@ const beforeUnloadHandler = (event) => {
 };
 
 async function initialize() {
+  setupTheme();
   const $indexData = document.getElementById('index-data');
   if (!$indexData) {
     alert("No data");
@@ -127,9 +130,41 @@ async function initialize() {
   }
 
   DATA = JSON.parse(decodeBase64($indexData.innerHTML));
+  if (DATA.kind === "View" && Object.hasOwn(PARAMS, "embed")) {
+    document.documentElement.classList.add("embedded-preview");
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        window.parent.postMessage("dufs:close-preview", "*");
+      }
+    });
+  }
   DIR_EMPTY_NOTE = PARAMS.q ? 'No results' : DATA.dir_exists ? 'Empty folder' : 'Folder will be created when a file is uploaded';
 
   await ready();
+}
+
+function setupTheme() {
+  const $theme = document.getElementById("theme");
+  try {
+    const saved = window.localStorage.getItem(THEME_STORAGE_KEY);
+    if (["system", "light", "dark"].includes(saved)) {
+      $theme.value = saved;
+    } else if (saved !== null) {
+      console.warn("Ignoring invalid saved theme:", saved);
+    }
+  } catch (err) {
+    console.warn("Could not read the saved theme:", err);
+  }
+  document.documentElement.dataset.theme = $theme.value;
+  $theme.addEventListener("change", () => {
+    document.documentElement.dataset.theme = $theme.value;
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, $theme.value);
+    } catch (err) {
+      alert(`Could not save theme preference: ${err.message}`);
+    }
+  });
 }
 
 if (document.readyState === "loading") {
@@ -156,21 +191,30 @@ async function ready() {
   addBreadcrumb(DATA.href, DATA.uri_prefix);
 
   if (DATA.kind === "Index") {
+    document.querySelector(".listing-title").textContent = PARAMS.q ? "Search results" : "Files";
+    updateListingCount();
     document.title = `Index of ${DATA.href} - Dufs`;
     document.querySelector(".index-page").classList.remove("hidden");
 
     await setupIndexPage();
   } else if (DATA.kind === "Edit") {
+    document.querySelector(".file-title").textContent = DATA.href.split("/").pop();
     document.title = `Edit ${DATA.href} - Dufs`;
     document.querySelector(".editor-page").classList.remove("hidden");
 
     await setupEditorPage();
   } else if (DATA.kind === "View") {
+    document.querySelector(".file-title").textContent = DATA.href.split("/").pop();
     document.title = `View ${DATA.href} - Dufs`;
     document.querySelector(".editor-page").classList.remove("hidden");
 
     await setupEditorPage();
   }
+}
+
+function updateListingCount() {
+  const count = DATA.paths ? DATA.paths.filter(Boolean).length : 0;
+  document.querySelector(".listing-count").textContent = `${count} ${count === 1 ? "item" : "items"}`;
 }
 
 class Uploader {
@@ -442,6 +486,7 @@ async function setupIndexPage() {
     const $download = document.querySelector(".download");
     $download.href = baseUrl() + "?zip";
     $download.title = "Download folder as a .zip file";
+    $download.querySelector("span").textContent = "Download ZIP";
     $download.classList.add("dlwt");
     $download.classList.remove("hidden");
   }
@@ -463,6 +508,7 @@ async function setupIndexPage() {
 
   renderPathsTableHead();
   renderPathsTableBody();
+  setupPreviewDialog();
 
   if (DATA.user) {
     setupDownloadWithToken();
@@ -581,27 +627,23 @@ function addPath(file, index, showMove, showDelete) {
     url += "/";
     if (DATA.allow_archive) {
       actionDownload = `
-      <div class="action-btn">
-        <a class="dlwt" href="${url}?zip" title="Download folder as a .zip file" download>${ICONS.download}</a>
-      </div>`;
+      <a class="action-btn download-action dlwt" href="${url}?zip" title="Download folder as a .zip file" download>${ICONS.download}<span>Download</span></a>`;
     }
   } else {
     actionDownload = `
-    <div class="action-btn" >
-      <a class="dlwt" href="${url}" title="Download file" download>${ICONS.download}</a>
-    </div>`;
+    <a class="action-btn download-action dlwt" href="${url}" title="Download file" download>${ICONS.download}<span>Download</span></a>`;
   }
   const canMove = file.allow_upload && file.allow_delete;
   const canEdit = !isDir && canMove;
   if (showMove) {
     if (canMove) {
-      actionMove = `<div onclick="movePath(${index})" class="action-btn" id="moveBtn${index}" title="Move & Rename">${ICONS.move}</div>`;
+      actionMove = `<button type="button" onclick="movePath(${index})" class="action-btn" id="moveBtn${index}" title="Move & Rename" aria-label="Move & Rename">${ICONS.move}</button>`;
     } else {
       actionMove = disabledAction(ICONS.move, `Cannot move: ${deniedReason(file, "move")}`);
     }
     if (!isDir) {
       if (canEdit) {
-        actionEdit = `<a class="action-btn" title="Edit file" target="_blank" href="${url}?edit">${ICONS.edit}</a>`;
+        actionEdit = `<a class="action-btn" title="Edit file" aria-label="Edit file" target="_blank" href="${url}?edit">${ICONS.edit}</a>`;
       } else {
         actionEdit = disabledAction(ICONS.edit, `Cannot edit: ${deniedReason(file, "edit")}`);
       }
@@ -610,13 +652,13 @@ function addPath(file, index, showMove, showDelete) {
   if (showDelete) {
     if (file.allow_delete) {
       actionDelete = `
-    <div onclick="deletePath(${index})" class="action-btn" id="deleteBtn${index}" title="Delete">${ICONS.delete}</div>`;
+    <button type="button" onclick="deletePath(${index})" class="action-btn" id="deleteBtn${index}" title="Delete" aria-label="Delete">${ICONS.delete}</button>`;
     } else {
       actionDelete = disabledAction(ICONS.delete, `Cannot delete: ${deniedReason(file, "delete")}`);
     }
   }
-  if (!canEdit && !isDir) {
-    actionView = `<a class="action-btn" title="View file" target="_blank" href="${url}?view">${ICONS.view}</a>`;
+  if (!isDir) {
+    actionView = `<a class="action-btn preview-link" data-index="${index}" title="View file" aria-label="View file" href="${url}?view">${ICONS.view}</a>`;
   }
   let actionCell = `
   <td class="cell-actions">
@@ -631,16 +673,45 @@ function addPath(file, index, showMove, showDelete) {
 
   $pathsTableBody.insertAdjacentHTML("beforeend", `
 <tr id="addPath${index}">
-  <td class="path cell-icon">
-    ${getPathSvg(file.path_type)}
+  <td class="path cell-icon ${isDir ? "folder-icon" : "file-icon"}">
+    ${getPathSvg(file.path_type, file.name)}
   </td>
   <td class="path cell-name">
-    <a href="${url}" ${isDir ? "" : `target="_blank"`}>${encodedName}</a>
+    <a href="${url}${isDir ? "" : "?view"}" ${isDir ? "" : `class="preview-link" data-index="${index}"`}>${encodedName}</a>
   </td>
   <td class="cell-mtime">${formatMtime(file.mtime)}</td>
   <td class="cell-size">${sizeDisplay}</td>
   ${actionCell}
 </tr>`);
+}
+
+function setupPreviewDialog() {
+  const $dialog = document.querySelector(".preview-dialog");
+  const $frame = $dialog.querySelector(".preview-frame");
+  const $title = $dialog.querySelector("#preview-title");
+  const $download = $dialog.querySelector(".preview-download");
+
+  $pathsTableBody.addEventListener("click", event => {
+    const $link = event.target.closest("a.preview-link");
+    if (!$link || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    const file = DATA.paths[Number($link.dataset.index)];
+    if (!file) return;
+    event.preventDefault();
+    const url = newUrl(file.name);
+    $title.textContent = file.name;
+    $download.href = url;
+    $frame.src = `${url}?view&embed`;
+    $dialog.showModal();
+  });
+
+  $dialog.addEventListener("close", () => {
+    $frame.removeAttribute("src");
+  });
+  window.addEventListener("message", event => {
+    if (event.source === $frame.contentWindow && event.data === "dufs:close-preview" && $dialog.open) {
+      $dialog.close();
+    }
+  });
 }
 
 function setupDropzone() {
@@ -762,6 +833,10 @@ async function setupEditorPage() {
   const $download = document.querySelector(".download");
   $download.classList.remove("hidden");
   $download.href = url;
+  if (DATA.user) {
+    $download.classList.add("dlwt");
+    setupDownloadWithToken();
+  }
 
   if (DATA.kind == "Edit") {
     if (DATA.allow_upload && DATA.allow_delete) {
@@ -788,30 +863,71 @@ async function setupEditorPage() {
       });
     }
 
-    if (DATA.editable && DATA.allow_upload) {
+    if (DATA.editable && DATA.allow_upload && !mediaType(baseName(url))) {
       const $saveBtn = document.querySelector(".save-btn");
       $saveBtn.classList.remove("hidden");
       $saveBtn.addEventListener("click", saveChange);
     }
   } else if (DATA.kind == "View") {
-    $editor.readonly = true;
+    $editor.readOnly = true;
+  }
+
+  const filename = baseName(url);
+  const ext = extName(filename).toLowerCase();
+  if (IMAGE_FORMATS.includes(ext) && (DATA.kind === "View" || !DATA.editable)) {
+    const $preview = document.querySelector(".media-preview");
+    const $image = document.createElement("img");
+    $image.alt = `Preview of ${filename}`;
+    const $error = document.createElement("p");
+    $error.className = "preview-error hidden";
+    $error.textContent = "This image could not be displayed. The file may be unavailable or unsupported by your browser.";
+    $image.addEventListener("error", () => {
+      $image.classList.add("hidden");
+      $error.classList.remove("hidden");
+    });
+    $image.src = url;
+    $preview.append($image, $error);
+    $preview.classList.remove("hidden");
+    return;
+  }
+
+  const media = mediaType(filename);
+  if (media) {
+    const $preview = document.querySelector(".media-preview");
+    const $player = document.createElement(media);
+    $player.controls = true;
+    $player.preload = "metadata";
+    $player.src = url;
+    $player.setAttribute("aria-label", `${media === "video" ? "Video" : "Audio"} preview`);
+    const $error = document.createElement("p");
+    $error.className = "preview-error hidden";
+    $error.textContent = "This media could not be played. Try downloading the file instead.";
+    $player.addEventListener("error", () => $error.classList.remove("hidden"));
+    $preview.append($player, $error);
+    $preview.classList.remove("hidden");
+    return;
   }
 
   if (!DATA.editable) {
     const $notEditable = document.querySelector(".not-editable");
-    const url = baseUrl();
-    const ext = extName(baseName(url));
     if (IFRAME_FORMATS.find(v => v === ext)) {
-      $notEditable.insertAdjacentHTML("afterend", `<iframe src="${url}" sandbox width="100%" height="${window.innerHeight - 100}px"></iframe>`);
+      const $frame = document.createElement("iframe");
+      $frame.src = url;
+      $frame.className = "file-preview";
+      $frame.title = "File preview";
+      $frame.setAttribute("sandbox", "");
+      $notEditable.insertAdjacentElement("afterend", $frame);
     } else {
       $notEditable.classList.remove("hidden");
-      $notEditable.textContent = "Cannot edit because file is too large or binary.";
+      $notEditable.textContent = DATA.kind === "View"
+        ? "Cannot preview this file because it is too large or binary."
+        : "Cannot edit because file is too large or binary.";
     }
     return;
   }
 
   $editor.classList.remove("hidden");
-  $editor.readonly = DATA.kind == "View" || !DATA.allow_upload;
+  $editor.readOnly = DATA.kind == "View" || !DATA.allow_upload;
   try {
     const res = await fetch(baseUrl());
     await assertResOK(res);
@@ -840,6 +956,7 @@ async function deletePath(index) {
   await doDeletePath(file.name, newUrl(file.name), () => {
     document.getElementById(`addPath${index}`)?.remove();
     DATA.paths[index] = null;
+    updateListingCount();
     if (!DATA.paths.find(v => !!v)) {
       $pathsTable.classList.add("hidden");
       $emptyFolder.textContent = DIR_EMPTY_NOTE;
@@ -1056,17 +1173,41 @@ function extName(filename) {
   return filename.substring(dotIndex);
 }
 
-function getPathSvg(path_type) {
+function mediaType(filename) {
+  const ext = extName(filename).toLowerCase();
+  if (VIDEO_FORMATS.includes(ext)) return "video";
+  if (AUDIO_FORMATS.includes(ext)) return "audio";
+  return "";
+}
+
+function getPathSvg(path_type, filename = "") {
   switch (path_type) {
     case "Dir":
-      return ICONS.dir;
+      return `<i class="ph-bold ph-folder" aria-hidden="true"></i>`;
     case "SymlinkFile":
-      return ICONS.symlinkFile;
+      return `<i class="ph-bold ph-link-simple" aria-hidden="true"></i>`;
     case "SymlinkDir":
-      return ICONS.symlinkDir;
-    default:
-      return ICONS.file;
+      return `<i class="ph-bold ph-folder-simple" aria-hidden="true"></i>`;
   }
+  const ext = extName(filename).toLowerCase();
+  if (VIDEO_FORMATS.includes(ext)) return `<i class="ph-bold ph-file-video" aria-hidden="true"></i>`;
+  if (AUDIO_FORMATS.includes(ext)) return `<i class="ph-bold ph-file-audio" aria-hidden="true"></i>`;
+  if (IMAGE_FORMATS.includes(ext)) {
+    return `<i class="ph-bold ph-file-image" aria-hidden="true"></i>`;
+  }
+  if (ext === ".pdf") return `<i class="ph-bold ph-file-pdf" aria-hidden="true"></i>`;
+  if ([".zip", ".tar", ".gz", ".tgz", ".rar", ".7z", ".bz2", ".xz"].includes(ext)) {
+    return `<i class="ph-bold ph-file-zip" aria-hidden="true"></i>`;
+  }
+  if ([".html", ".htm", ".css", ".js", ".jsx", ".ts", ".tsx", ".java", ".py", ".rb", ".php", ".go", ".rs", ".c", ".cpp", ".h", ".hpp", ".sh", ".bash", ".zsh", ".sql", ".yaml", ".yml", ".json", ".xml", ".toml"].includes(ext)) {
+    return `<i class="ph-bold ph-file-code" aria-hidden="true"></i>`;
+  }
+  if ([".doc", ".docx", ".odt", ".rtf", ".md", ".markdown", ".txt", ".log", ".csv", ".tsv"].includes(ext)) {
+    return `<i class="ph-bold ph-file-text" aria-hidden="true"></i>`;
+  }
+  if ([".xls", ".xlsx", ".ods"].includes(ext)) return `<i class="ph-bold ph-file-xls" aria-hidden="true"></i>`;
+  if ([".ppt", ".pptx", ".odp", ".key"].includes(ext)) return `<i class="ph-bold ph-presentation" aria-hidden="true"></i>`;
+  return `<i class="ph-bold ph-file" aria-hidden="true"></i>`;
 }
 
 function formatMtime(mtime) {
